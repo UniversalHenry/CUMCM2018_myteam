@@ -20,7 +20,203 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from .environment import Env
+def loaddata(setorder):
+    if setorder == 1:
+        RGVtime1step,RGVtime2step,RGVtime3step, \
+        CNCtime1in1,CNCtime1in2,CNCtime2in2, \
+        RGVtimeOddCNC,RGVtimeEvenCNC,RGVtimeclean \
+        = 20,33,46,560,400,378,28,31,25
+    elif setorder == 2:
+        RGVtime1step,RGVtime2step,RGVtime3step, \
+        CNCtime1in1,CNCtime1in2,CNCtime2in2, \
+        RGVtimeOddCNC,RGVtimeEvenCNC,RGVtimeclean \
+        =23,41,59,580,280,500,30,35,30
+    elif setorder == 3:
+        RGVtime1step,RGVtime2step,RGVtime3step, \
+        CNCtime1in1,CNCtime1in2,CNCtime2in2, \
+        RGVtimeOddCNC,RGVtimeEvenCNC,RGVtimeclean \
+        =18,41,59,580,280,500,30,35,30
+
+    return [RGVtime1step,RGVtime2step,RGVtime3step], \
+           [CNCtime1in1,CNCtime1in2,CNCtime2in2], \
+           [RGVtimeOddCNC,RGVtimeEvenCNC,RGVtimeclean]
+
+work_time = 8*3600
+
+def get_err_pro(time_1run):
+    err_pro_1time = 0.01
+    err_pro_1s = 1 - (1-err_pro_1time)**(1/(time_1run))
+    return err_pro_1s
+
+# def get_fix_time():
+#
+# def get_err():
+#
+
+class CNC:
+    def __init__(self,num_process,contain_err,CNCtime):
+        self.timer = 0
+        self.thing = 0
+        self.thingorder = 0
+        if num_process == 1:
+            self.processtime = [CNCtime[0]]
+        if num_process == 2:
+            self.processtime = [CNCtime[1],CNCtime[2]]
+        if contain_err:
+            self.err = [get_err_pro(x) for x in self.processtime]
+
+class RGV:
+    def __init__(self,setorder,num_process,contain_err):
+        self.timer = 0
+        self.place = 0
+        self.action = 0     #0,1,2,3 represent move to the place, 4 hold odd, 5 hold even ,6 clean
+        self.thing = 0
+        self.thingorder = 0
+        RGVtime1,CNCtime,RGVtime2 = loaddata(setorder)
+        self.steptime = [0,RGVtime1[0],RGVtime1[1],RGVtime1[2]]
+        self.holdtime = [RGVtime2[1],RGVtime2[0]]
+        self.cleantime = RGVtime2[2]
+        self.cnc = [CNC(num_process,contain_err,CNCtime) for i in range(8)]
+
+
+class Env:                  #our environment
+    def __init__(self, setorder, num_process, contain_err):
+        self.action_space = 7
+        self.observation_space = 18
+        self.timer = 0
+        self.setorder = setorder
+        self.numprocess = num_process
+        self.containerr = contain_err
+        self.thingorder = 0
+        self.onrecord = {'cnc':[],'time':[],'thingorder':[],'process':[]}
+        self.offrecord = {'cnc':[],'time':[],'thingorder':[],'process':[]}
+        self.rgv = RGV(setorder,num_process,contain_err)
+        self.rewardaccumulate = 0
+        self.punishaccumulate = 0
+        self.reward = 0
+        self.punish = 0
+
+    def reset(self):
+        self.__init__(self.setorder,self.numprocess,self.containerr)
+        return [0 for i in range(18)]
+
+    def counter(self):
+        self.timer += 1
+        if self.rgv.timer > 0:
+            self.rgv.timer -= 1
+        cnctimer1 = [self.rgv.cnc[i].timer for i in range(8)]
+        for i in range(8):
+            if self.rgv.cnc[i].timer > 0:
+                self.rgv.cnc[i].timer -= 1
+            if cnctimer1[i] != 0 and self.rgv.cnc[i].timer == 0:
+                self.rgv.cnc[i].thing += 1
+        punish = cnctimer1.count(0)
+        self.punish += punish
+        self.punishaccumulate += punish
+        # if self.containerr:
+
+
+    def step(self,action):
+        assert self.rgv.timer == 0
+        self.rgv.action = action
+        if action>=0 and action<=3:
+            self.rgv.timer = self.rgv.steptime[abs(self.rgv.place-action)]
+            self.rgv.place = action
+
+        if action==4:               #even in here cnc 1,3,5,7 represent CNC #2,4,6,8
+            if self.rgv.cnc[self.rgv.place*2+1].timer == 0:
+                tmpthing = self.rgv.thing
+                self.rgv.thing = self.rgv.cnc[self.rgv.place*2+1].thing
+                self.rgv.cnc[self.rgv.place*2+1].thing = tmpthing
+                self.rgv.timer = self.rgv.holdtime[0]
+                tmpthingorder = self.rgv.thingorder
+                self.rgv.thingorder = self.rgv.cnc[self.rgv.place*2+1].thingorder
+                self.rgv.cnc[self.rgv.place*2+1].thingorder = tmpthingorder
+                if tmpthing == 0:
+                    self.thingorder += 1
+                    self.rgv.cnc[self.rgv.place*2+1].thingorder = self.thingorder
+                    self.onrecord['cnc'].append(self.rgv.place*2+2)
+                    self.onrecord['time'].append(self.timer)
+                    self.onrecord['thingorder'].append(self.thingorder)
+                    self.onrecord['process'].append(1)
+                if tmpthing > 0:
+                    self.onrecord['cnc'].append(self.rgv.place*2+2)
+                    self.onrecord['time'].append(self.timer)
+                    self.onrecord['thingorder'].append(self.thingorder)
+                    self.onrecord['process'].append(tmpthing+1)
+                if self.rgv.thing > 0:
+                    self.offrecord['cnc'].append(self.rgv.place*2+2)
+                    self.offrecord['time'].append(self.timer)
+                    self.offrecord['thingorder'].append(self.thingorder)
+                    self.offrecord['process'].append(tmpthing)
+                if self.rgv.cnc[self.rgv.place*2+1].processtime.__len__() > tmpthing:
+                    self.rgv.cnc[self.rgv.place*2+1].timer = self.rgv.cnc[self.rgv.place*2+1].processtime[tmpthing] + self.rgv.holdtime[0]
+            else:
+                self.punish += 1
+                self.punishaccumulate +=1
+
+        if action==5:               #even in here cnc 0,2,4,6 represent CNC #1,3,5,7
+            if self.rgv.cnc[self.rgv.place*2].timer == 0:
+                tmpthing = self.rgv.thing
+                self.rgv.thing = self.rgv.cnc[self.rgv.place*2].thing
+                self.rgv.cnc[self.rgv.place*2].thing = tmpthing
+                self.rgv.timer = self.rgv.holdtime[1]
+                tmpthingorder = self.rgv.thingorder
+                self.rgv.thingorder = self.rgv.cnc[self.rgv.place*2].thingorder
+                self.rgv.cnc[self.rgv.place*2].thingorder = tmpthingorder
+                if tmpthing == 0:
+                    self.thingorder += 1
+                    self.rgv.cnc[self.rgv.place*2].thingorder = self.thingorder
+                    self.onrecord['cnc'].append(self.rgv.place*2+1)
+                    self.onrecord['time'].append(self.timer)
+                    self.onrecord['thingorder'].append(self.thingorder)
+                    self.onrecord['process'].append(1)
+                if tmpthing > 0:
+                    self.onrecord['cnc'].append(self.rgv.place*2+1)
+                    self.onrecord['time'].append(self.timer)
+                    self.onrecord['thingorder'].append(self.thingorder)
+                    self.onrecord['process'].append(tmpthing+1)
+                if self.rgv.thing > 0:
+                    self.offrecord['cnc'].append(self.rgv.place*2+1)
+                    self.offrecord['time'].append(self.timer)
+                    self.offrecord['thingorder'].append(self.thingorder)
+                    self.offrecord['process'].append(tmpthing)
+                if self.rgv.thing < self.numprocess:
+                    self.reward += self.rgv.thing
+                    self.rewardaccumulate += self.rgv.thing
+                if self.rgv.cnc[self.rgv.place*2].processtime.__len__() > tmpthing:
+                    self.rgv.cnc[self.rgv.place*2].timer = self.rgv.cnc[self.rgv.place*2].processtime[tmpthing] + self.rgv.holdtime[1]
+            else:
+                self.punish += 1
+                self.punishaccumulate +=1
+
+        if action==6:
+            if self.rgv.thing == self.numprocess:
+                self.rgv.timer = self.rgv.cleantime
+                self.rgv.thingorder = 0
+                self.rgv.thing = 0
+                self.reward += self.rgv.thing
+                self.rewardaccumulate += self.rgv.thing
+            else:
+                self.punish += 1
+                self.punishaccumulate +=1
+
+        s_ = [self.rgv.cnc[i].timer for i in range(8)]
+        s_ = s_+ [self.rgv.cnc[i].thing for i in range(8)]
+        s_ = s_ + [self.rgv.place,self.rgv.thing]
+
+        if self.timer > work_time:
+            self.reset()
+            done = 1
+        else:
+            done = 0
+
+        r = self.reward*self.punishaccumulate/max(self.rewardaccumulate,0.01) - self.punish*self.rewardaccumulate/max(self.punishaccumulate,0.01)
+
+        info = [self.onrecord,self.offrecord]
+
+        return s_, r, done, info
+
 
 env = Env(1,1,0)        # environment ( setorder, num_process, contain_err)
 
@@ -31,8 +227,8 @@ EPSILON = 0.9               # greedy policy
 GAMMA = 0.9                 # reward discount
 TARGET_REPLACE_ITER = 100   # target update frequency
 MEMORY_CAPACITY = 2000
-N_ACTIONS = env.action_space.n
-N_STATES = env.observation_space.shape[0]
+N_ACTIONS = env.action_space
+N_STATES = env.observation_space
 
 class Net(nn.Module):
     def __init__(self, ):
@@ -117,30 +313,26 @@ dqn = DQN()
 
 print('\nCollecting experience...')
 for i_episode in range(400):
+    print('(episode'+str(i_episode)+'/'+str(399)+')\n')
+    j = 0
     s = env.reset()
-    ep_r = 0
     while True:
-        env.render()
-        a = dqn.choose_action(s)
+        if env.rgv.timer == 0:
+            a = dqn.choose_action(s)
+            # take action
+            s_, r, done, info = env.step(a)
 
-        # take action
-        s_, r, done, info = env.step(a)
+            dqn.store_transition(s, a, r, s_)
 
-        # modify the reward
-        x, x_dot, theta, theta_dot = s_
-        r1 = (env.x_threshold - abs(x)) / env.x_threshold - 0.8
-        r2 = (env.theta_threshold_radians - abs(theta)) / env.theta_threshold_radians - 0.5
-        r = r1 + r2
-
-        dqn.store_transition(s, a, r, s_)
-
-        ep_r += r
-        if dqn.memory_counter > MEMORY_CAPACITY:
-            dqn.learn()
             if done:
-                print('Ep: ', i_episode,
-                      '| Ep_r: ', round(ep_r, 2))
+                break
 
-        if done:
-            break
-        s = s_
+            if dqn.memory_counter > MEMORY_CAPACITY:
+                dqn.learn()
+
+            s = s_
+            j += 1
+            if j % 100 == 0:
+                print(str(env.timer)+'')
+                print('\n')
+        env.counter()
