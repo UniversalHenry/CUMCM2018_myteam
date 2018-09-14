@@ -21,6 +21,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
+random_seed = 0
+SetOrder = 1
+
+
+np.random.seed(random_seed)
+torch.manual_seed(np.random.randint(random_seed,random_seed+100))
+
+
 def loaddata(setorder):
     if setorder == 1:
         RGVtime1step,RGVtime2step,RGVtime3step, \
@@ -234,7 +242,6 @@ TARGET_REPLACE_ITER = 100   # target update frequency
 MEMORY_CAPACITY = 2000
 N_ACTIONS = env.action_space
 N_STATES = env.observation_space
-torch.manual_seed(0)
 
 class Net(nn.Module):
     def __init__(self, ):
@@ -266,7 +273,6 @@ class Net(nn.Module):
 class DQN(object):
     def __init__(self):
         self.eval_net, self.target_net = Net(), Net()
-
         self.learn_step_counter = 0                                     # for target updating
         self.memory_counter = 0                                         # for storing memory
         self.memory = np.zeros((MEMORY_CAPACITY, N_STATES * 2 + 2))     # initialize memory
