@@ -12,7 +12,6 @@ More about Reinforcement learning: https://morvanzhou.github.io/tutorials/machin
 
 Dependencies:
 torch: 0.4
-gym: 0.8.1
 numpy
 """
 
@@ -21,7 +20,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-import gym
+from .environment import Env
+
+env = Env(1,1,0)        # environment ( setorder, num_process, contain_err)
 
 # Hyper Parameters
 BATCH_SIZE = 32
@@ -30,23 +31,31 @@ EPSILON = 0.9               # greedy policy
 GAMMA = 0.9                 # reward discount
 TARGET_REPLACE_ITER = 100   # target update frequency
 MEMORY_CAPACITY = 2000
-env = gym.make('CartPole-v0')
-env = env.unwrapped
 N_ACTIONS = env.action_space.n
 N_STATES = env.observation_space.shape[0]
-ENV_A_SHAPE = 0 if isinstance(env.action_space.sample(), int) else env.action_space.sample().shape     # to confirm the shape
-
 
 class Net(nn.Module):
     def __init__(self, ):
         super(Net, self).__init__()
         self.fc1 = nn.Linear(N_STATES, 50)
         self.fc1.weight.data.normal_(0, 0.1)   # initialization
+        self.fc2 = nn.Linear(50, 100)
+        self.fc2.weight.data.normal_(0, 0.1)   # initialization
+        self.fc3 = nn.Linear(100, 100)
+        self.fc3.weight.data.normal_(0, 0.1)   # initialization
+        self.fc4 = nn.Linear(100, 50)
+        self.fc4.weight.data.normal_(0, 0.1)   # initialization
         self.out = nn.Linear(50, N_ACTIONS)
         self.out.weight.data.normal_(0, 0.1)   # initialization
 
     def forward(self, x):
         x = self.fc1(x)
+        x = F.relu(x)
+        x = self.fc2(x)
+        x = F.relu(x)
+        x = self.fc3(x)
+        x = F.relu(x)
+        x = self.fc4(x)
         x = F.relu(x)
         actions_value = self.out(x)
         return actions_value
@@ -68,10 +77,9 @@ class DQN(object):
         if np.random.uniform() < EPSILON:   # greedy
             actions_value = self.eval_net.forward(x)
             action = torch.max(actions_value, 1)[1].data.numpy()
-            action = action[0] if ENV_A_SHAPE == 0 else action.reshape(ENV_A_SHAPE)  # return the argmax index
+            action = action[0]                                          # return the argmax index
         else:   # random
             action = np.random.randint(0, N_ACTIONS)
-            action = action if ENV_A_SHAPE == 0 else action.reshape(ENV_A_SHAPE)
         return action
 
     def store_transition(self, s, a, r, s_):
