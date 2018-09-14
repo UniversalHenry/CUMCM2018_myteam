@@ -15,6 +15,6 @@ def loaddata(setorder):
         RGVtimeOddCNC,RGVtimeEvenCNC,RGVtimeclean \
         =18,41,59,580,280,500,30,35,30
 
-    return RGVtime1step,RGVtime2step,RGVtime3step, \
-           CNCtime1in1,CNCtime1in2,CNCtime2in2, \
-           RGVtimeOddCNC,RGVtimeEvenCNC,RGVtimeclean
+    return [RGVtime1step,RGVtime2step,RGVtime3step], \
+           [CNCtime1in1,CNCtime1in2,CNCtime2in2], \
+           [RGVtimeOddCNC,RGVtimeEvenCNC,RGVtimeclean]
