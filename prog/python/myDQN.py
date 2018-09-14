@@ -20,6 +20,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+
 def loaddata(setorder):
     if setorder == 1:
         RGVtime1step,RGVtime2step,RGVtime3step, \
@@ -97,7 +98,11 @@ class Env:                  #our environment
         self.punish = 0
 
     def reset(self):
+        r1 = self.rewardaccumulate
+        r2 = self.punishaccumulate
         self.__init__(self.setorder,self.numprocess,self.containerr)
+        self.rewardaccumulate = r1
+        self.punishaccumulate = r2
         return [0 for i in range(18)]
 
     def counter(self):
@@ -182,8 +187,8 @@ class Env:                  #our environment
                     self.offrecord['thingorder'].append(self.thingorder)
                     self.offrecord['process'].append(tmpthing)
                 if self.rgv.thing < self.numprocess:
-                    self.reward += self.rgv.thing
-                    self.rewardaccumulate += self.rgv.thing
+                    self.reward += self.rgv.thing+1
+                    self.rewardaccumulate += self.rgv.thing+1
                 if self.rgv.cnc[self.rgv.place*2].processtime.__len__() > tmpthing:
                     self.rgv.cnc[self.rgv.place*2].timer = self.rgv.cnc[self.rgv.place*2].processtime[tmpthing] + self.rgv.holdtime[1]
             else:
@@ -195,8 +200,8 @@ class Env:                  #our environment
                 self.rgv.timer = self.rgv.cleantime
                 self.rgv.thingorder = 0
                 self.rgv.thing = 0
-                self.reward += self.rgv.thing
-                self.rewardaccumulate += self.rgv.thing
+                self.reward += self.rgv.thing+1
+                self.rewardaccumulate += self.rgv.thing +1
             else:
                 self.punish += 1
                 self.punishaccumulate +=1
@@ -206,14 +211,14 @@ class Env:                  #our environment
         s_ = s_ + [self.rgv.place,self.rgv.thing]
 
         if self.timer > work_time:
-            self.reset()
             done = 1
         else:
             done = 0
 
         r = self.reward*self.punishaccumulate/max(self.rewardaccumulate,0.01) - self.punish*self.rewardaccumulate/max(self.punishaccumulate,0.01)
-
-        info = [self.onrecord,self.offrecord]
+        env.reward = 0
+        env.punish = 0
+        info = {'onrecord':self.onrecord,'offrecord':self.offrecord}
 
         return s_, r, done, info
 
@@ -229,6 +234,7 @@ TARGET_REPLACE_ITER = 100   # target update frequency
 MEMORY_CAPACITY = 2000
 N_ACTIONS = env.action_space
 N_STATES = env.observation_space
+torch.manual_seed(0)
 
 class Net(nn.Module):
     def __init__(self, ):
@@ -311,28 +317,27 @@ class DQN(object):
 
 dqn = DQN()
 
+rec = []
+info = {}
 print('\nCollecting experience...')
 for i_episode in range(400):
-    print('(episode'+str(i_episode)+'/'+str(399)+')\n')
-    j = 0
+    print('(episode'+str(i_episode)+'/'+str(399)+')')
     s = env.reset()
     while True:
         if env.rgv.timer == 0:
             a = dqn.choose_action(s)
             # take action
             s_, r, done, info = env.step(a)
-
             dqn.store_transition(s, a, r, s_)
-
             if done:
                 break
-
             if dqn.memory_counter > MEMORY_CAPACITY:
                 dqn.learn()
-
             s = s_
-            j += 1
-            if j % 100 == 0:
-                print(str(env.timer)+'')
-                print('\n')
         env.counter()
+    rec = rec + [max(info['offrecord']['thingorder']+[0])]
+    print(max(info['offrecord']['thingorder']+[0]))
+    if rec.index(max(rec)) == i_episode:
+        torch.save(dqn,'./best_dqn.tar.gz')
+        torch.save({'info':info,'rec':rec,'best':i_episode},'./info.tar.gz')
+    torch.save(dqn,'./dqn.tar.gz')
